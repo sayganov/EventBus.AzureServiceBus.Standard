@@ -15,16 +15,14 @@ namespace EventBus.AzureServiceBus.Standard.Configuration
                 var lifetimeScope = sp.GetRequiredService<ILifetimeScope>();
                 var eventBusSubscriptionsManager = sp.GetRequiredService<IEventBusSubscriptionManager>();
 
-                var brokerName = options.BrokerName;
                 var autofacScopeName = options.AutofacScopeName;
-                var queueName = options.QueueName;
+                var subscriptionClientName = options.SubscriptionClientName;
 
                 return new EventBusServiceBus(serviceBusPersistentConnection,
                     lifetimeScope,
                     eventBusSubscriptionsManager,
-                    brokerName,
                     autofacScopeName,
-                    queueName);
+                    subscriptionClientName);
             });
 
             services.AddSingleton<IEventBusSubscriptionManager, InMemoryEventBusSubscriptionManager>();

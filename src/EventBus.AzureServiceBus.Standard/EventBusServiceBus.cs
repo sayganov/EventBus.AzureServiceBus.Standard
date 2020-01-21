@@ -14,34 +14,25 @@ namespace EventBus.AzureServiceBus.Standard
         private readonly IServiceBusPersistentConnection _persistentConnection;
         private readonly IEventBusSubscriptionManager _subsManager;
         private readonly ILifetimeScope _autofac;
-
         private readonly SubscriptionClient _subscriptionClient;
-
         private readonly string _autofacScopeName;
-        private readonly string _brokerName;
+        private const string IntegrationEventSuffix = "IntegrationEvent";
 
-        public EventBusServiceBus(IServiceBusPersistentConnection persistentConnection,
-            ILifetimeScope autofac,
-            IEventBusSubscriptionManager subsManager,
-            string brokerName,
-            string autofacScopeName,
-            string queueName = null)
+        public EventBusServiceBus(IServiceBusPersistentConnection persistentConnection, ILifetimeScope autofac, IEventBusSubscriptionManager subsManager, string autofacScopeName, string subscriptionClientName = null)
         {
             _persistentConnection = persistentConnection ?? throw new ArgumentNullException(nameof(persistentConnection));
             _subsManager = subsManager ?? new InMemoryEventBusSubscriptionManager();
             _autofac = autofac ?? throw new ArgumentNullException(nameof(autofac));
-            _subscriptionClient = new SubscriptionClient(persistentConnection.ServiceBusConnectionStringBuilder, queueName);
+            _subscriptionClient = new SubscriptionClient(persistentConnection.ServiceBusConnectionStringBuilder, subscriptionClientName);
+            _autofacScopeName = autofacScopeName;
 
             RemoveDefaultRule();
             RegisterSubscriptionClientMessageHandler();
-
-            _brokerName = brokerName;
-            _autofacScopeName = autofacScopeName;
         }
 
         public void Publish(IntegrationEvent @event)
         {
-            var eventName = @event.GetType().Name.Replace(_brokerName, "");
+            var eventName = @event.GetType().Name.Replace(IntegrationEventSuffix, "");
             var jsonMessage = JsonConvert.SerializeObject(@event);
             var body = Encoding.UTF8.GetBytes(jsonMessage);
 
@@ -66,9 +57,9 @@ namespace EventBus.AzureServiceBus.Standard
 
         public void Subscribe<T, TH>() where T : IntegrationEvent where TH : IIntegrationEventHandler<T>
         {
-            var eventName = typeof(T).Name.Replace(_brokerName, "");
-            var containsKey = _subsManager.HasSubscriptionsForEvent<T>();
+            var eventName = typeof(T).Name.Replace(IntegrationEventSuffix, "");
 
+            var containsKey = _subsManager.HasSubscriptionsForEvent<T>();
             if (!containsKey)
                 try
                 {
@@ -87,7 +78,7 @@ namespace EventBus.AzureServiceBus.Standard
 
         public void Unsubscribe<T, TH>() where T : IntegrationEvent where TH : IIntegrationEventHandler<T>
         {
-            var eventName = typeof(T).Name.Replace(_brokerName, "");
+            var eventName = typeof(T).Name.Replace(IntegrationEventSuffix, "");
 
             try
             {
@@ -118,7 +109,7 @@ namespace EventBus.AzureServiceBus.Standard
             _subscriptionClient.RegisterMessageHandler(
                 async (message, token) =>
                 {
-                    var eventName = $"{message.Label}{_brokerName}";
+                    var eventName = $"{message.Label}{IntegrationEventSuffix}";
                     var messageData = Encoding.UTF8.GetString(message.Body);
 
                     // Complete the message so that it is not received again.
@@ -127,46 +118,46 @@ namespace EventBus.AzureServiceBus.Standard
                 new MessageHandlerOptions(ExceptionReceivedHandler) {MaxConcurrentCalls = 10, AutoComplete = false});
         }
 
-        private static Task ExceptionReceivedHandler(ExceptionReceivedEventArgs exceptionReceivedEventArgs)
+        private Task ExceptionReceivedHandler(ExceptionReceivedEventArgs exceptionReceivedEventArgs)
         {
-            var ex = exceptionReceivedEventArgs.Exception;
-            var context = exceptionReceivedEventArgs.ExceptionReceivedContext;
-
             return Task.CompletedTask;
         }
 
         private async Task<bool> ProcessEvent(string eventName, string message)
         {
-            if (!_subsManager.HasSubscriptionsForEvent(eventName)) return false;
+            var processed = false;
 
-            using (var scope = _autofac.BeginLifetimeScope(_autofacScopeName))
+            if (_subsManager.HasSubscriptionsForEvent(eventName))
             {
-                var subscriptions = _subsManager.GetHandlersForEvent(eventName);
-                
-                foreach (var subscription in subscriptions)
-                    if (subscription.IsDynamic)
-                    {
-                        var handler = scope.ResolveOptional(subscription.HandlerType) as IDynamicIntegrationEventHandler;
+                using (var scope = _autofac.BeginLifetimeScope(_autofacScopeName))
+                {
+                    var subscriptions = _subsManager.GetHandlersForEvent(eventName);
+                    foreach (var subscription in subscriptions)
+                        if (subscription.IsDynamic)
+                        {
+                            var handler = scope.ResolveOptional(subscription.HandlerType) as IDynamicIntegrationEventHandler;
+                            if (handler == null) continue;
+                            dynamic eventData = JObject.Parse(message);
+                            await handler.Handle(eventData);
+                        }
+                        else
+                        {
+                            var handler = scope.ResolveOptional(subscription.HandlerType);
 
-                        if (handler == null) continue;
-                        dynamic eventData = JObject.Parse(message);
-                        await handler.Handle(eventData);
-                    }
-                    else
-                    {
-                        var handler = scope.ResolveOptional(subscription.HandlerType);
-                        
-                        if (handler == null) continue;
-                        
-                        var eventType = _subsManager.GetEventTypeByName(eventName);
-                        var integrationEvent = JsonConvert.DeserializeObject(message, eventType);
-                        var concreteType = typeof(IIntegrationEventHandler<>).MakeGenericType(eventType);
-                        
-                        await (Task) concreteType.GetMethod("Handle").Invoke(handler, new[] {integrationEvent});
-                    }
+                            if (handler == null) continue;
+
+                            var eventType = _subsManager.GetEventTypeByName(eventName);
+                            var integrationEvent = JsonConvert.DeserializeObject(message, eventType);
+                            var concreteType = typeof(IIntegrationEventHandler<>).MakeGenericType(eventType);
+
+                            await (Task) concreteType.GetMethod("Handle").Invoke(handler, new[] {integrationEvent});
+                        }
+                }
+
+                processed = true;
             }
 
-            return true;
+            return processed;
         }
 
         private void RemoveDefaultRule()
