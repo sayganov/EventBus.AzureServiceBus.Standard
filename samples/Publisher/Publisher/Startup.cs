@@ -21,10 +21,10 @@ namespace Publisher
         public void ConfigureServices(IServiceCollection services)
         {
             //Event Bus
-            var eventBusOptions = Configuration.GetSection("AzureServiceBus").Get<AzureServiceBusOptions>();
+            var azureServiceBusOptions = Configuration.GetSection("AzureServiceBus").Get<AzureServiceBusOptions>();
 
-            services.AddAsbConnection(eventBusOptions);
-            services.AddAsbRegistration(eventBusOptions);
+            services.AddAsbConnection(azureServiceBusOptions);
+            services.AddAsbRegistration(azureServiceBusOptions);
 
             //Swagger
             services.AddSwaggerGen(c =>
