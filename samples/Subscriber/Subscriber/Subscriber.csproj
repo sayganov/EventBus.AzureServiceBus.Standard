@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="5.0.1" />
-    <PackageReference Include="EventBus.AzureServiceBus.Standard" Version="1.0.1" />
+    <PackageReference Include="EventBus.AzureServiceBus.Standard" Version="1.0.2" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="5.0.0-rc5" />
   </ItemGroup>
 
